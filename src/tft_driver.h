@@ -44,7 +44,7 @@ extern void tft_driver_init(void);
  * @param operation LCD operation type
  * @return struct LcdOperation* Pointer to operation struct
  */
-extern struct LcdOperation* bbm_new_operation(LcdOperationEnum operation);
+extern struct LcdOperation* tft_new_operation(LcdOperationEnum operation);
 
 /**
  * @brief Submit LCD operation(s)
@@ -53,7 +53,7 @@ extern struct LcdOperation* bbm_new_operation(LcdOperationEnum operation);
  *
  * @param op Operation to submit
  */
-extern void bbm_submit(struct LcdOperation* op);
+extern void tft_submit(struct LcdOperation* op);
 
 /**
  * @brief Start render
@@ -61,7 +61,7 @@ extern void bbm_submit(struct LcdOperation* op);
  * rendered operations are taken out of the queue and
  * freed (if lo_static is false)
  */
-extern void bbm_start_render();
+extern void tft_start_render();
 
 #ifdef __cplusplus
 }
