@@ -175,52 +175,101 @@ void tft_submit(struct LcdOperation* op) {
     }
 }
 
+void tft_insert_after(struct LcdOperation* position, struct LcdOperation* op) {
+    if(position == tft_lcdLastOp)
+        tft_lcdLastOp = op;
+    op->lo_next = position->lo_next;
+    position->lo_next = op;
+}
+
+void tft_render_op(struct LcdOperation* op);
+
+void tft_render_text(struct LcdOperation* op) {
+    size_t xMax = 0;
+
+    size_t x = 0, y = op->lo_text.font->bf_yAdvance;
+
+    // Calculate text pixel dimensions
+    for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
+        if(*textPtr == '\n') {
+            y += op->lo_text.font->bf_yAdvance;
+            x = 0;
+        } else {
+            if(*textPtr > op->lo_text.font->bf_lastChar)
+                continue;
+            uint8_t glyphOffset = *textPtr - op->lo_text.font->bf_firstChar;
+            x += op->lo_text.font->bf_glyphs[glyphOffset].bfg_xAdvance;
+        }
+
+        if(x > xMax)
+            xMax = x;
+    }
+
+    size_t pixelsPerLine = xMax * op->lo_text.font->bf_yAdvance;
+    size_t maxLines = LCD_BUFFER_SIZE / pixelsPerLine;
+
+    for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
+
+    }
+
+    /*struct LcdOperation* rect = tft_new_operation(RECT_FILL);
+    rect->lo_fg.word = 0b111110000011111;
+    rect->lo_x = op->lo_x;
+    rect->lo_y = op->lo_y;
+    rect->lo_rect.height = y;
+    rect->lo_rect.width = xMax;
+
+    tft_render_op(rect);
+    //tft_insert_after(op, rect);*/
+}
+
 void tft_render_op(struct LcdOperation* op) {
     switch(op->lo_op) {
         case RECT_FILL: {
-            size_t modifiedPixels = op->lo_width * op->lo_height;
+            size_t modifiedPixels = op->lo_rect.width * op->lo_rect.height;
             if(modifiedPixels > LCD_BUFFER_SIZE) {
-                size_t maxLines = LCD_BUFFER_SIZE / op->lo_width;
+                size_t maxLines = LCD_BUFFER_SIZE / op->lo_rect.width;
 
-                modifiedPixels = maxLines * op->lo_width;
-                tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_width - 1, op->lo_y + maxLines - 1);
+                modifiedPixels = maxLines * op->lo_rect.width;
+                tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_rect.width - 1, op->lo_y + maxLines - 1);
 
                 struct LcdOperation* fillContinue = tft_new_operation(RECT_FILL);
                 fillContinue->lo_x = op->lo_x;
                 fillContinue->lo_y = op->lo_y + maxLines;
-                fillContinue->lo_width = op->lo_width;
-                fillContinue->lo_height = op->lo_height - maxLines;
-                fillContinue->lo_color = op->lo_color;
+                fillContinue->lo_rect.width = op->lo_rect.width;
+                fillContinue->lo_rect.height = op->lo_rect.height - maxLines;
+                fillContinue->lo_fg = op->lo_fg;
 
-                if(op == tft_lcdLastOp)
-                    tft_lcdLastOp = fillContinue;
-                fillContinue->lo_next = op->lo_next;
-                op->lo_next = fillContinue;
+                tft_insert_after(op, fillContinue);
             } else {
-                tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_width - 1, op->lo_y + op->lo_height - 1);
+                tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_rect.width - 1, op->lo_y + op->lo_rect.height - 1);
             }
 
             for(size_t i = 0; i < modifiedPixels; ++i) {
                 tft_lcdBuffer[i * LCD_BYTES_PER_PIXEL] =
-                     (op->lo_color.r << 3) |
-                    ((op->lo_color.g >> 2) & 0x7);
+                     (op->lo_fg.r << 3) |
+                    ((op->lo_fg.g >> 2) & 0x7);
                 tft_lcdBuffer[i * LCD_BYTES_PER_PIXEL + 1] =
-                    ((op->lo_color.g & 0x3) << 6) |
-                      op->lo_color.b;
+                    ((op->lo_fg.g & 0x3) << 6) |
+                      op->lo_fg.b;
             }
 
             tft_lcd_data(tft_lcdBuffer, modifiedPixels * LCD_BYTES_PER_PIXEL);
         } break;
+        case TEXT: {
+            tft_render_text(op);
+        } break;
     }
-
-    // Take the operation out of queue
-    tft_lcdOperations = op->lo_next;
-    // Don't free static operations
-    if(!op->lo_static)
-        free(op);
 }
 
 void tft_lcd_dma_complete() {
+    // Take the current operation out of queue
+    struct LcdOperation* oldOp = tft_lcdOperations;
+    tft_lcdOperations = tft_lcdOperations->lo_next;
+    // Don't free static operations
+    if(!oldOp->lo_static)
+        free(oldOp);
+
     // Wait for SPI to finish doing it's thing
     SPI_WAIT_NBSY();
 

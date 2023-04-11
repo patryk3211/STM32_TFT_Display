@@ -7,11 +7,14 @@ extern "C" {
 
 #include <stdint.h>
 
+#include "font.h"
+
 #define LCD_BUFFER_SIZE 16 * 1024
 #define LCD_BYTES_PER_PIXEL 2
 
-typedef enum {
-    RECT_FILL = 0
+typedef enum LcdOperationEnum_t {
+    RECT_FILL,
+    TEXT
 } LcdOperationEnum;
 
 struct LcdOperation {
@@ -23,16 +26,33 @@ struct LcdOperation {
             uint16_t g:5;
             uint16_t b:5;
         };
-    } lo_color;
+    } lo_fg;
+
+    union {
+        uint16_t word;
+        struct {
+            uint16_t r:5;
+            uint16_t g:5;
+            uint16_t b:5;
+        };
+    } lo_bg;
+
+    char lo_static;
+    struct LcdOperation* lo_next;
 
     uint16_t lo_x;
     uint16_t lo_y;
 
-    uint16_t lo_width;
-    uint16_t lo_height;
-
-    char lo_static;
-    struct LcdOperation* lo_next;
+    union {
+        struct {
+            uint16_t width;
+            uint16_t height;
+        } lo_rect;
+        struct {
+            const char* value;
+            const struct BitmapFont* font;
+        } lo_text;
+    };
 };
 
 extern void tft_driver_init(void);
