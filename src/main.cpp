@@ -9,7 +9,7 @@ void setup() {
     tft_driver_init();
 
     LcdOperation* oper1 = tft_new_operation(RECT_FILL);
-    oper1->lo_fg.word = 0;
+    oper1->lo_fg = TFT_BLACK;
     oper1->lo_x = 0;
     oper1->lo_y = 0;
     oper1->lo_rect.width = 320;
@@ -17,7 +17,8 @@ void setup() {
     tft_submit(oper1);
 
     LcdOperation* textOper = tft_new_operation(TEXT);
-    textOper->lo_fg.word = 0b111110000000000;
+    textOper->lo_fg = TFT_WHITE;
+    textOper->lo_bg = tft_colmul(TFT_GREEN, 0.25);
     textOper->lo_x = 20;
     textOper->lo_y = 20;
     //textOper->lo_rect.width = 50;

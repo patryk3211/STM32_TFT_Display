@@ -10,32 +10,43 @@ extern "C" {
 #include "font.h"
 
 #define LCD_BUFFER_SIZE 16 * 1024
-#define LCD_BYTES_PER_PIXEL 2
 
 typedef enum LcdOperationEnum_t {
     RECT_FILL,
     TEXT
 } LcdOperationEnum;
 
+typedef union LcdColor_t {
+    uint16_t word;
+    struct {
+        uint16_t r:5;
+        uint16_t g:5;
+        uint16_t zero:1;
+        uint16_t b:5;
+    };
+} LcdColor;
+
+#define TFT_BLACK   (LcdColor) { 0b0000000000000000 }
+#define TFT_WHITE   (LcdColor) { 0b1111111111011111 }
+#define TFT_RED     (LcdColor) { 0b0000000000011111 }
+#define TFT_GREEN   (LcdColor) { 0b0000011111000000 }
+#define TFT_BLUE    (LcdColor) { 0b1111100000000000 }
+#define TFT_YELLOW  (LcdColor) { 0b0000011111011111 }
+#define TFT_MAGENTA (LcdColor) { 0b1111100000011111 }
+#define TFT_CYAN    (LcdColor) { 0b1111111111000000 }
+
+static inline LcdColor tft_colmul(LcdColor color, float scalar) {
+    LcdColor result;
+    result.r = (float)color.r * scalar;
+    result.g = (float)color.g * scalar;
+    result.b = (float)color.b * scalar;
+    return result;
+}
+
 struct LcdOperation {
     LcdOperationEnum lo_op;
-    union {
-        uint16_t word;
-        struct {
-            uint16_t r:5;
-            uint16_t g:5;
-            uint16_t b:5;
-        };
-    } lo_fg;
-
-    union {
-        uint16_t word;
-        struct {
-            uint16_t r:5;
-            uint16_t g:5;
-            uint16_t b:5;
-        };
-    } lo_bg;
+    LcdColor lo_fg;
+    LcdColor lo_bg;
 
     char lo_static;
     struct LcdOperation* lo_next;

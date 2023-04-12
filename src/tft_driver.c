@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 #include "tft_driver.h"
 
 #include <stm32f4xx_hal.h>
@@ -40,6 +38,7 @@
 
 #define SPI_WAIT_NBSY() while(__HAL_SPI_GET_FLAG(&tft_lcdSPI, SPI_FLAG_BSY))
 
+#include <Arduino.h>
 #define LCD_DELAY(ms) delay((ms));
 
 /********** LCD TFT driver initialization commands **********/
@@ -60,7 +59,7 @@ const uint8_t TFT_Init_Sequence[] = {
 SPI_HandleTypeDef tft_lcdSPI;
 DMA_HandleTypeDef tft_lcdDMA;
 
-uint8_t tft_lcdBuffer[LCD_BUFFER_SIZE * LCD_BYTES_PER_PIXEL]; // We'll allocate a 16K buffer for drawing things
+uint16_t tft_lcdBuffer[LCD_BUFFER_SIZE]; // We'll allocate a 16K buffer for drawing things
 
 struct LcdOperation* tft_lcdOperations = 0;
 struct LcdOperation* tft_lcdLastOp = 0;
@@ -77,11 +76,18 @@ void tft_lcd_cmd(uint8_t cmd) {
     LCD_SELECT();
 
     LCD_MODE_CMD();
-    uint8_t buffer[2];
-    buffer[0] = 0;
-    buffer[1] = cmd;
-    HAL_SPI_Transmit(&tft_lcdSPI, buffer, 2, 10);
+    if(tft_lcdSPI.Init.DataSize == SPI_DATASIZE_8BIT) {
+        uint8_t buffer[2];
+        buffer[0] = 0;
+        buffer[1] = cmd;
+        HAL_SPI_Transmit(&tft_lcdSPI, buffer, 2, 10);
+    } else {
+        uint16_t buffer = cmd;
+        HAL_SPI_Transmit(&tft_lcdSPI, (uint8_t*)&buffer, 1, 10);
+    }
     SPI_WAIT_NBSY();
+
+    LCD_MODE_DATA();
 
     LCD_DESELECT();
 }
@@ -98,14 +104,23 @@ void tft_lcd_cmd_data(uint8_t cmd, const void* data, size_t length) {
     LCD_SELECT();
 
     LCD_MODE_CMD();
-    uint8_t buffer[2];
-    buffer[0] = 0;
-    buffer[1] = cmd;
-    HAL_SPI_Transmit(&tft_lcdSPI, buffer, 2, 10);
+    if(tft_lcdSPI.Init.DataSize == SPI_DATASIZE_8BIT) {
+        uint8_t buffer[2];
+        buffer[0] = 0;
+        buffer[1] = cmd;
+        HAL_SPI_Transmit(&tft_lcdSPI, buffer, 2, 10);
+    } else {
+        uint16_t buffer = cmd;
+        HAL_SPI_Transmit(&tft_lcdSPI, (uint8_t*)&buffer, 1, 10);
+    }
     SPI_WAIT_NBSY();
 
     LCD_MODE_DATA();
-    HAL_SPI_Transmit(&tft_lcdSPI, (uint8_t*)data, length, 10);
+    if(tft_lcdSPI.Init.DataSize == SPI_DATASIZE_8BIT) {
+        HAL_SPI_Transmit(&tft_lcdSPI, (uint8_t*)data, length, 10);
+    } else {
+        HAL_SPI_Transmit(&tft_lcdSPI, (uint8_t*)data, length / 2, 10);
+    }
     SPI_WAIT_NBSY();
 
     LCD_DESELECT();
@@ -137,20 +152,20 @@ void tft_lcd_data(const void* data, size_t length) {
  * @param y1 End row
  */
 void tft_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-    uint8_t data[8];
+    uint16_t data[4];
     memset(data, 0, sizeof(data));
 
-    data[1] = x0 >> 8;
-    data[3] = x0 & 0xFF;
-    data[5] = x1 >> 8;
-    data[7] = x1 & 0xFF;
-    tft_lcd_cmd_data(0x2A, data, 8);
+    data[0] = x0 >> 8;
+    data[1] = x0 & 0xFF;
+    data[2] = x1 >> 8;
+    data[3] = x1 & 0xFF;
+    tft_lcd_cmd_data(0x2A, data, sizeof(data));
 
-    data[1] = y0 >> 8;
-    data[3] = y0 & 0xFF;
-    data[5] = y1 >> 8;
-    data[7] = y1 & 0xFF;
-    tft_lcd_cmd_data(0x2B, data, 8);
+    data[0] = y0 >> 8;
+    data[1] = y0 & 0xFF;
+    data[2] = y1 >> 8;
+    data[3] = y1 & 0xFF;
+    tft_lcd_cmd_data(0x2B, data, sizeof(data));
 
     tft_lcd_cmd(0x2C);
 }
@@ -184,35 +199,49 @@ void tft_insert_after(struct LcdOperation* position, struct LcdOperation* op) {
 
 void tft_render_op(struct LcdOperation* op);
 
+#define LCD_ENCODE_COLOR(pos, color) {\
+    size_t __pos = (pos); \
+    tft_lcdBuffer[(__pos)] = (color).word; \
+}
+
 void tft_render_text(struct LcdOperation* op) {
+    const size_t lineHeight = op->lo_text.font->bf_yAdvance;
+
     size_t xMax = 0;
+    size_t x = 0;
 
-    size_t x = 0, y = 1;
-
-    // Calculate text pixel dimensions
+    // Calculate line length
     for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
         if(*textPtr == '\n') {
-            ++y;
             x = 0;
         } else {
-            if(*textPtr > op->lo_text.font->bf_lastChar)
+            if(*textPtr < op->lo_text.font->bf_firstChar || *textPtr > op->lo_text.font->bf_lastChar)
                 continue;
             uint8_t glyphOffset = *textPtr - op->lo_text.font->bf_firstChar;
-            x += op->lo_text.font->bf_glyphs[glyphOffset].bfg_xAdvance;
+            struct BitmapFontGlyph glyph = op->lo_text.font->bf_glyphs[glyphOffset];
+            x += glyph.bfg_xAdvance;
         }
 
         if(x > xMax)
             xMax = x;
     }
 
-    size_t pixelsPerLine = xMax * op->lo_text.font->bf_yAdvance;
+    size_t pixelsPerLine = xMax * lineHeight;
     size_t maxLines = LCD_BUFFER_SIZE / pixelsPerLine;
 
     size_t line = 1;
-    y = op->lo_text.font->bf_yAdvance; x = 0;
+    size_t y = lineHeight;
+    x = 0;
 
     for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
         if(*textPtr == '\n') {
+            // Fill to the end of the line
+            for(size_t yy = y - lineHeight; yy < y; ++yy) {
+                for(size_t xx = x; xx < xMax; ++xx) {
+                    LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+                }
+            }
+
             // Move to the next line
             ++line;
             x = 0;
@@ -226,19 +255,62 @@ void tft_render_text(struct LcdOperation* op) {
                 cont->lo_y = op->lo_y + y;
                 cont->lo_text.font = op->lo_text.font;
                 cont->lo_text.value = textPtr + 1;
+
+                tft_insert_after(op, cont);
+                break;
             }
-            y += op->lo_text.font->bf_yAdvance;
+            y += lineHeight;
         } else {
-            if(*textPtr > op->lo_text.font->bf_lastChar)
+            if(*textPtr < op->lo_text.font->bf_firstChar || *textPtr > op->lo_text.font->bf_lastChar)
                 continue;
             uint8_t glyphOffset = *textPtr - op->lo_text.font->bf_firstChar;
             struct BitmapFontGlyph glyph = op->lo_text.font->bf_glyphs[glyphOffset];
 
-#define BUFFER_POS(x, y) ((x) + (y) * xMax)
+            size_t bitmapOffset = glyph.bfg_bitmapOffset;
+            uint8_t bits;
+            uint8_t mask = 0;
 
-            for(size_t y = 0; y < glyph.bfg_height; ++y) {
-                for(size_t x = 0; x < glyph.bfg_width; ++x) {
-                    glyph.bfg_bitmapOffset;
+            // Before bit-mapped area (vertically)
+            for(size_t yy = y - lineHeight; yy < y + glyph.bfg_yOffset - 1; ++yy) {
+                for(size_t xx = x; xx < x + glyph.bfg_xAdvance; ++xx) {
+                    LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+                }
+            }
+
+            // After bit-mapped area (vertically)
+            for(size_t yy = y + glyph.bfg_yOffset - 1 + glyph.bfg_height; yy < y; ++yy) {
+                for(size_t xx = x; xx < x + glyph.bfg_xAdvance; ++xx) {
+                    LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+                }
+            }
+
+            // Before bit-mapped area (horizontally)
+            for (size_t xx = x; xx < x + glyph.bfg_xOffset; ++xx) {
+                for(size_t yy = y + glyph.bfg_yOffset - 1; yy < y + glyph.bfg_yOffset - 1 + glyph.bfg_height; ++yy) {
+                    LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+                }
+            }
+
+            // After bit-mapped area (horizontally)
+            for (size_t xx = x + glyph.bfg_xOffset + glyph.bfg_width; xx < x + glyph.bfg_xAdvance; ++xx) {
+                for(size_t yy = y + glyph.bfg_yOffset - 1; yy < y + glyph.bfg_yOffset - 1 + glyph.bfg_height; ++yy) {
+                    LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+                }
+            }
+
+            for(size_t yy = 0; yy < glyph.bfg_height; ++yy) {
+                for(size_t xx = 0; xx < glyph.bfg_width; ++xx) {
+                    if(!mask) {
+                        mask = 0x80;
+                        bits = op->lo_text.font->bf_bitmap[bitmapOffset++];
+                    }
+
+                    LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg;
+                    mask >>= 1;
+
+                    size_t xPos = x + xx + glyph.bfg_xOffset;
+                    size_t yPos = y + yy + glyph.bfg_yOffset - 1;
+                    LCD_ENCODE_COLOR(xPos + yPos * xMax, color);
                 }
             }
 
@@ -246,17 +318,15 @@ void tft_render_text(struct LcdOperation* op) {
         }
     }
 
-    tft_lcd_data(tft_lcdBuffer, line * pixelsPerLine);
+    // Fill to the end of the line
+    for(size_t yy = y - lineHeight; yy < y; ++yy) {
+        for(size_t xx = x; xx < xMax; ++xx) {
+            LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
+        }
+    }
 
-    /*struct LcdOperation* rect = tft_new_operation(RECT_FILL);
-    rect->lo_fg.word = 0b111110000011111;
-    rect->lo_x = op->lo_x;
-    rect->lo_y = op->lo_y;
-    rect->lo_rect.height = y;
-    rect->lo_rect.width = xMax;
-
-    tft_render_op(rect);
-    //tft_insert_after(op, rect);*/
+    tft_set_window(op->lo_x, op->lo_y, op->lo_x + xMax - 1, op->lo_y + y - 1);
+    tft_lcd_data(tft_lcdBuffer, xMax * y);
 }
 
 void tft_render_op(struct LcdOperation* op) {
@@ -282,15 +352,10 @@ void tft_render_op(struct LcdOperation* op) {
             }
 
             for(size_t i = 0; i < modifiedPixels; ++i) {
-                tft_lcdBuffer[i * LCD_BYTES_PER_PIXEL] =
-                     (op->lo_fg.r << 3) |
-                    ((op->lo_fg.g >> 2) & 0x7);
-                tft_lcdBuffer[i * LCD_BYTES_PER_PIXEL + 1] =
-                    ((op->lo_fg.g & 0x3) << 6) |
-                      op->lo_fg.b;
+                LCD_ENCODE_COLOR(i, op->lo_fg);
             }
 
-            tft_lcd_data(tft_lcdBuffer, modifiedPixels * LCD_BYTES_PER_PIXEL);
+            tft_lcd_data(tft_lcdBuffer, modifiedPixels);
         } break;
         case TEXT: {
             tft_render_text(op);
@@ -382,8 +447,8 @@ void tft_driver_init() {
     tft_lcdDMA.Init.Direction = DMA_MEMORY_TO_PERIPH;
     tft_lcdDMA.Init.PeriphInc = DMA_PINC_DISABLE;
     tft_lcdDMA.Init.MemInc = DMA_MINC_ENABLE;
-    tft_lcdDMA.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    tft_lcdDMA.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    tft_lcdDMA.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    tft_lcdDMA.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     tft_lcdDMA.Init.PeriphBurst = DMA_PBURST_SINGLE;
     tft_lcdDMA.Init.MemBurst = DMA_MBURST_SINGLE;
     tft_lcdDMA.Init.Priority = DMA_PRIORITY_HIGH;
@@ -420,8 +485,8 @@ void tft_driver_init() {
                 tft_lcd_cmd(cmd);
                 --i;
             } else {
-                tft_lcd_cmd_data(cmd, dataStart, (char*)dataEnd - (char*)dataStart);
-                i += (char*)dataEnd - (char*)dataStart - 1;
+                tft_lcd_cmd_data(cmd, dataStart, (uint8_t*)dataEnd - (uint8_t*)dataStart);
+                i += (uint8_t*)dataEnd - (uint8_t*)dataStart - 1;
             }
         }
     }
@@ -429,6 +494,10 @@ void tft_driver_init() {
     // Display on
     tft_lcd_cmd(0x29);
     LCD_DELAY(150);
+
+    // Switch SPI into 16 bit mode for faster data transfer
+    tft_lcdSPI.Init.DataSize = SPI_DATASIZE_16BIT;
+    HAL_SPI_Init(&tft_lcdSPI);
 }
 
 void DMA2_Stream2_IRQHandler() {
