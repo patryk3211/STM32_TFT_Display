@@ -187,12 +187,12 @@ void tft_render_op(struct LcdOperation* op);
 void tft_render_text(struct LcdOperation* op) {
     size_t xMax = 0;
 
-    size_t x = 0, y = op->lo_text.font->bf_yAdvance;
+    size_t x = 0, y = 1;
 
     // Calculate text pixel dimensions
     for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
         if(*textPtr == '\n') {
-            y += op->lo_text.font->bf_yAdvance;
+            ++y;
             x = 0;
         } else {
             if(*textPtr > op->lo_text.font->bf_lastChar)
@@ -208,9 +208,45 @@ void tft_render_text(struct LcdOperation* op) {
     size_t pixelsPerLine = xMax * op->lo_text.font->bf_yAdvance;
     size_t maxLines = LCD_BUFFER_SIZE / pixelsPerLine;
 
-    for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
+    size_t line = 1;
+    y = op->lo_text.font->bf_yAdvance; x = 0;
 
+    for(const char* textPtr = op->lo_text.value; *textPtr; ++textPtr) {
+        if(*textPtr == '\n') {
+            // Move to the next line
+            ++line;
+            x = 0;
+
+            if(line > maxLines) {
+                // Submit a new text draw with remaining text
+                struct LcdOperation* cont = tft_new_operation(TEXT);
+                cont->lo_fg = op->lo_fg;
+                cont->lo_bg = op->lo_bg;
+                cont->lo_x = op->lo_x;
+                cont->lo_y = op->lo_y + y;
+                cont->lo_text.font = op->lo_text.font;
+                cont->lo_text.value = textPtr + 1;
+            }
+            y += op->lo_text.font->bf_yAdvance;
+        } else {
+            if(*textPtr > op->lo_text.font->bf_lastChar)
+                continue;
+            uint8_t glyphOffset = *textPtr - op->lo_text.font->bf_firstChar;
+            struct BitmapFontGlyph glyph = op->lo_text.font->bf_glyphs[glyphOffset];
+
+#define BUFFER_POS(x, y) ((x) + (y) * xMax)
+
+            for(size_t y = 0; y < glyph.bfg_height; ++y) {
+                for(size_t x = 0; x < glyph.bfg_width; ++x) {
+                    glyph.bfg_bitmapOffset;
+                }
+            }
+
+            x += glyph.bfg_xAdvance;
+        }
     }
+
+    tft_lcd_data(tft_lcdBuffer, line * pixelsPerLine);
 
     /*struct LcdOperation* rect = tft_new_operation(RECT_FILL);
     rect->lo_fg.word = 0b111110000011111;
