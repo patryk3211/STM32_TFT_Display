@@ -10,6 +10,7 @@ extern "C" {
 #include "font.h"
 
 #define LCD_BUFFER_SIZE 16 * 1024
+#define LCD_MAX_DMA_TRANSFER 32 * 1024 - 2
 
 typedef enum LcdOperationEnum_t {
     RECT_FILL,
@@ -78,13 +79,22 @@ extern void tft_driver_init(void);
 extern struct LcdOperation* tft_new_operation(LcdOperationEnum operation);
 
 /**
- * @brief Submit LCD operation(s)
- * Submits an LCD operation (multiple of lo_next is not zero)
- * to the render queue.
+ * @brief Submit LCD operation
+ * Submits an LCD operation to the render queue.
  *
  * @param op Operation to submit
  */
 extern void tft_submit(struct LcdOperation* op);
+
+/**
+ * @brief Submit LCD operations
+ * Submits multiple LCD operations to the render queue,
+ * the operations are not freed after the render is finished.
+ * 
+ * @param ops Array of operations
+ * @param count Length of the array
+ */
+extern void tft_submit_multiple(struct LcdOperation* ops, unsigned int count);
 
 /**
  * @brief Start render

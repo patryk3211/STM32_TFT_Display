@@ -126,6 +126,19 @@ void tft_lcd_cmd_data(uint8_t cmd, const void* data, size_t length) {
     LCD_DESELECT();
 }
 
+void tft_dma_memmode(int incrementMemory) {
+    int current = tft_lcdDMA.Init.MemInc == DMA_MINC_ENABLE;
+    if(current && incrementMemory)
+        return;
+    if(!current && !incrementMemory)
+        return;
+    if(incrementMemory)
+        tft_lcdDMA.Init.MemInc = DMA_MINC_ENABLE;
+    else
+        tft_lcdDMA.Init.MemInc = DMA_MINC_DISABLE;
+    HAL_DMA_Init(&tft_lcdDMA);
+}
+
 /**
  * @brief LCD data
  * Sends data to LCD using DMA
@@ -133,7 +146,7 @@ void tft_lcd_cmd_data(uint8_t cmd, const void* data, size_t length) {
  * @param data Data
  * @param length Length of data
  */
-void tft_lcd_data(const void* data, size_t length) {
+void tft_lcd_dma(const void* data, size_t length) {
     LCD_SELECT();
     LCD_MODE_DATA();
 
@@ -190,12 +203,32 @@ void tft_submit(struct LcdOperation* op) {
     }
 }
 
+void tft_submit_multiple(struct LcdOperation* ops, size_t count) {
+    for(size_t i = 0; i < count; ++i) {
+        // We cannot free these operations as they are part of an array,
+        // we will assume that all arrays are declared statically.
+        ops[i].lo_static = 1;
+        tft_submit(&ops[i]);
+    }
+}
+
+/**
+ * @brief Insert operation after position
+ * This function inserts a rendering operation after the
+ * specified position in the render queue.
+ *
+ * @param position Position to insert after
+ * @param op Operation to be inserted
+ */
 void tft_insert_after(struct LcdOperation* position, struct LcdOperation* op) {
     if(position == tft_lcdLastOp)
         tft_lcdLastOp = op;
     op->lo_next = position->lo_next;
     position->lo_next = op;
 }
+
+
+/********** Start of rendering functions **********/
 
 void tft_render_op(struct LcdOperation* op);
 
@@ -326,15 +359,16 @@ void tft_render_text(struct LcdOperation* op) {
     }
 
     tft_set_window(op->lo_x, op->lo_y, op->lo_x + xMax - 1, op->lo_y + y - 1);
-    tft_lcd_data(tft_lcdBuffer, xMax * y);
+    tft_dma_memmode(1);
+    tft_lcd_dma(tft_lcdBuffer, xMax * y);
 }
 
 void tft_render_op(struct LcdOperation* op) {
     switch(op->lo_op) {
         case RECT_FILL: {
             size_t modifiedPixels = op->lo_rect.width * op->lo_rect.height;
-            if(modifiedPixels > LCD_BUFFER_SIZE) {
-                size_t maxLines = LCD_BUFFER_SIZE / op->lo_rect.width;
+            if(modifiedPixels > LCD_MAX_DMA_TRANSFER) {
+                size_t maxLines = (LCD_MAX_DMA_TRANSFER) / op->lo_rect.width;
 
                 modifiedPixels = maxLines * op->lo_rect.width;
                 tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_rect.width - 1, op->lo_y + maxLines - 1);
@@ -351,17 +385,16 @@ void tft_render_op(struct LcdOperation* op) {
                 tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_rect.width - 1, op->lo_y + op->lo_rect.height - 1);
             }
 
-            for(size_t i = 0; i < modifiedPixels; ++i) {
-                LCD_ENCODE_COLOR(i, op->lo_fg);
-            }
-
-            tft_lcd_data(tft_lcdBuffer, modifiedPixels);
+            tft_dma_memmode(0);
+            tft_lcd_dma(&op->lo_fg, modifiedPixels);
         } break;
         case TEXT: {
             tft_render_text(op);
         } break;
     }
 }
+
+/********** End of rendering functions **********/
 
 void tft_lcd_dma_complete() {
     // Take the current operation out of queue
