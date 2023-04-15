@@ -391,51 +391,64 @@ void tft_render_text(struct LcdOperation* op) {
     tft_lcd_dma(tft_lcdBuffer, xMax * y);
 }
 
+#define READ_BYTE(source) ((uint8_t*)op->source.bitmap)[bitmapPos++]
+#define DO_BITMAP_RENDERING(source) \
+    size_t maxHeight = LCD_BUFFER_SIZE / (op->source.width * op->source.scale * op->source.scale); \
+    size_t processHeight = op->source.height; \
+    uint8_t doContinue = 0; \
+\
+    if(processHeight > maxHeight) { \
+        processHeight = maxHeight; \
+        doContinue = 1; \
+    } \
+ \
+    for(size_t y = 0; y < processHeight; ++y) { \
+        for(size_t x = 0; x < op->source.width; ++x) { \
+            if(!mask) { \
+                bits = READ_BYTE(source); \
+                mask = 0x80; \
+            } \
+ \
+            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg; \
+            mask >>= 1; \
+ \
+            if(op->source.scale == 1) { \
+                LCD_ENCODE_COLOR(x + y * op->source.width, color); \
+            } else {\
+                for(size_t i = 0; i < op->source.scale; ++i) { \
+                    for(size_t j = 0; j < op->source.scale; ++j) { \
+                        LCD_ENCODE_COLOR((x * op->source.scale + i) + (y * op->source.scale + j) * (op->source.width * op->source.scale), color); \
+                    } \
+                } \
+            } \
+        } \
+    } \
+ \
+    tft_set_window(op->lo_x, op->lo_y, op->lo_x + (op->source.width * op->source.scale) - 1, op->lo_y + (processHeight * op->source.scale) - 1); \
+    tft_dma_memmode(1); \
+    tft_lcd_dma(tft_lcdBuffer, op->source.width * processHeight * op->source.scale * op->source.scale); \
+ \
+    if(doContinue) { \
+        struct LcdOperation* contOp = tft_new_operation(BITMAP_CONTINUE); \
+        contOp->lo_fg = op->lo_fg; \
+        contOp->lo_bg = op->lo_bg; \
+        contOp->lo_x = op->lo_x; \
+        contOp->lo_y = op->lo_y + processHeight; \
+        contOp->lo_bitmap_cont.width = op->source.width; \
+        contOp->lo_bitmap_cont.height = op->source.height - processHeight; \
+        contOp->lo_bitmap_cont.bitmap = op->source.bitmap; \
+        contOp->lo_bitmap_cont.bits = bits; \
+        contOp->lo_bitmap_cont.mask = mask; \
+        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos; \
+        contOp->lo_bitmap_cont.scale = op->source.scale; \
+        tft_insert_after(op, contOp); \
+    }
+
 void tft_render_bitmap(struct LcdOperation* op) {
     uint8_t bits, mask = 0;
     size_t bitmapPos = 0;
 
-    size_t maxHeight = LCD_BUFFER_SIZE / op->lo_bitmap.width;
-    size_t processHeight = op->lo_bitmap.height;
-    uint8_t doContinue = 0;
-
-    if(processHeight > maxHeight) {
-        processHeight = maxHeight;
-        doContinue = 1;
-    }
-
-    for(size_t y = 0; y < processHeight; ++y) {
-        for(size_t x = 0; x < op->lo_bitmap.width; ++x) {
-            if(!mask) {
-                bits = ((uint8_t*)op->lo_bitmap.bitmap)[bitmapPos++];
-                mask = 0x80;
-            }
-
-            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg;
-            mask >>= 1;
-
-            LCD_ENCODE_COLOR(x + y * op->lo_bitmap.width, color);
-        }
-    }
-
-    tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_bitmap.width - 1, op->lo_y + processHeight - 1);
-    tft_dma_memmode(1);
-    tft_lcd_dma(tft_lcdBuffer, op->lo_bitmap.width * processHeight);
-
-    if(doContinue) {
-        struct LcdOperation* contOp = tft_new_operation(BITMAP_CONTINUE);
-        contOp->lo_fg = op->lo_fg;
-        contOp->lo_bg = op->lo_bg;
-        contOp->lo_x = op->lo_x;
-        contOp->lo_y = op->lo_y + processHeight;
-        contOp->lo_bitmap_cont.width = op->lo_bitmap.width;
-        contOp->lo_bitmap_cont.height = op->lo_bitmap.height - processHeight;
-        contOp->lo_bitmap_cont.bitmap = op->lo_bitmap.bitmap;
-        contOp->lo_bitmap_cont.bits = bits;
-        contOp->lo_bitmap_cont.mask = mask;
-        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos;
-        tft_insert_after(op, contOp);
-    }
+    DO_BITMAP_RENDERING(lo_bitmap)
 }
 
 void tft_render_cont_bitmap(struct LcdOperation* op) {
@@ -443,47 +456,96 @@ void tft_render_cont_bitmap(struct LcdOperation* op) {
     uint8_t mask = op->lo_bitmap_cont.mask;
     size_t bitmapPos = op->lo_bitmap_cont.bitmapOffset;
 
-    size_t maxHeight = LCD_BUFFER_SIZE / op->lo_bitmap_cont.width;
-    size_t processHeight = op->lo_bitmap_cont.height;
-    uint8_t doContinue = 0;
+    DO_BITMAP_RENDERING(lo_bitmap_cont)
+}
 
-    if(processHeight > maxHeight) {
-        processHeight = maxHeight;
-        doContinue = 1;
+// Simple RLE
+// Rules:
+// 0xFF - Control byte, signals a length encoding
+// 0xFF 0x00 0xFF - Escaped 0xFF byte
+// 0xFF 0xnn 0xmm - (nn + 1) bytes of 0xmm
+// 0xmm - Simple 1 byte data
+
+#define DO_RLE_BITMAP_RENDERING(source) \
+    size_t maxHeight = LCD_BUFFER_SIZE / (op->source.width * op->source.scale * op->source.scale); \
+    size_t processHeight = op->source.height; \
+    uint8_t doContinue = 0; \
+ \
+    if(processHeight > maxHeight) { \
+        processHeight = maxHeight; \
+        doContinue = 1; \
+    } \
+ \
+    for(size_t y = 0; y < processHeight; ++y) { \
+        for(size_t x = 0; x < op->source.width; ++x) { \
+            if(!mask) { \
+                if(lengthLeft > 0) { \
+                    --lengthLeft; \
+                } else { \
+                    uint8_t byte = READ_BYTE(source); \
+                    if(byte == 0xFF) { \
+                        /* Control byte */ \
+                        lengthLeft = READ_BYTE(source); \
+                        bits = READ_BYTE(source); \
+                    } else { \
+                        /* Simple data byte */ \
+                        bits = byte; \
+                    } \
+                } \
+                mask = 0x80; \
+            } \
+ \
+            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg; \
+            mask >>= 1; \
+ \
+            if(op->source.scale == 1) { \
+                LCD_ENCODE_COLOR(x + y * op->source.width, color); \
+            } else {\
+                for(size_t i = 0; i < op->source.scale; ++i) { \
+                    for(size_t j = 0; j < op->source.scale; ++j) { \
+                        LCD_ENCODE_COLOR((x * op->source.scale + i) + (y * op->source.scale + j) * (op->source.width * op->source.scale), color); \
+                    } \
+                } \
+            } \
+        } \
+    } \
+ \
+    tft_set_window(op->lo_x, op->lo_y, op->lo_x + (op->source.width * op->source.scale) - 1, op->lo_y + (processHeight * op->source.scale) - 1); \
+    tft_dma_memmode(1); \
+    tft_lcd_dma(tft_lcdBuffer, op->source.width * processHeight * op->source.scale * op->source.scale); \
+ \
+    if(doContinue) { \
+        struct LcdOperation* contOp = tft_new_operation(RLE_BITMAP_CONTINUE); \
+        contOp->lo_fg = op->lo_fg; \
+        contOp->lo_bg = op->lo_bg; \
+        contOp->lo_x = op->lo_x; \
+        contOp->lo_y = op->lo_y + processHeight; \
+        contOp->lo_bitmap_cont.width = op->source.width; \
+        contOp->lo_bitmap_cont.height = op->source.height - processHeight; \
+        contOp->lo_bitmap_cont.bitmap = op->source.bitmap; \
+        contOp->lo_bitmap_cont.bits = bits; \
+        contOp->lo_bitmap_cont.mask = mask; \
+        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos; \
+        contOp->lo_bitmap_cont.lengthLeft = lengthLeft; \
+        contOp->lo_bitmap_cont.scale = op->source.scale; \
+        tft_insert_after(op, contOp); \
     }
 
-    for(size_t y = 0; y < processHeight; ++y) {
-        for(size_t x = 0; x < op->lo_bitmap_cont.width; ++x) {
-            if(!mask) {
-                bits = ((uint8_t*)op->lo_bitmap_cont.bitmap)[bitmapPos++];
-                mask = 0x80;
-            }
+void tft_render_bitmap_rle(struct LcdOperation* op) {
+    uint8_t bits, mask = 0;
+    size_t bitmapPos = 0;
+    size_t lengthLeft = 0;
 
-            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg;
-            mask >>= 1;
+    DO_RLE_BITMAP_RENDERING(lo_bitmap)
+}
 
-            LCD_ENCODE_COLOR(x + y * op->lo_bitmap_cont.width, color);
-        }
-    }
+void tft_render_cont_bitmap_rle(struct LcdOperation* op) {
+    uint8_t bits = op->lo_bitmap_cont.bits;
+    uint8_t mask = op->lo_bitmap_cont.mask;
+    size_t bitmapPos = op->lo_bitmap_cont.bitmapOffset;
+    size_t lengthLeft = op->lo_bitmap_cont.lengthLeft;
 
-    tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_bitmap_cont.width - 1, op->lo_y + processHeight - 1);
-    tft_dma_memmode(1);
-    tft_lcd_dma(tft_lcdBuffer, op->lo_bitmap_cont.width * processHeight);
-
-    if(doContinue) {
-        struct LcdOperation* contOp = tft_new_operation(BITMAP_CONTINUE);
-        contOp->lo_fg = op->lo_fg;
-        contOp->lo_bg = op->lo_bg;
-        contOp->lo_x = op->lo_x;
-        contOp->lo_y = op->lo_y + processHeight;
-        contOp->lo_bitmap_cont.width = op->lo_bitmap_cont.width;
-        contOp->lo_bitmap_cont.height = op->lo_bitmap_cont.height - processHeight;
-        contOp->lo_bitmap_cont.bitmap = op->lo_bitmap_cont.bitmap;
-        contOp->lo_bitmap_cont.bits = bits;
-        contOp->lo_bitmap_cont.mask = mask;
-        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos;
-        tft_insert_after(op, contOp);
-    }
+    DO_RLE_BITMAP_RENDERING(lo_bitmap_cont)
 }
 
 void tft_render_op(struct LcdOperation* op) {
@@ -519,6 +581,12 @@ void tft_render_op(struct LcdOperation* op) {
             break;
         case BITMAP_CONTINUE:
             tft_render_cont_bitmap(op);
+            break;
+        case RLE_BITMAP:
+            tft_render_bitmap_rle(op);
+            break;
+        case RLE_BITMAP_CONTINUE:
+            tft_render_cont_bitmap_rle(op);
             break;
     }
 }

@@ -52,7 +52,9 @@ typedef enum LcdOperationEnum_t {
     RECT_FILL,
     TEXT,
     BITMAP,
-    BITMAP_CONTINUE
+    BITMAP_CONTINUE,
+    RLE_BITMAP,
+    RLE_BITMAP_CONTINUE
 } LcdOperationEnum;
 
 struct LcdOperation {
@@ -79,14 +81,17 @@ struct LcdOperation {
             uint16_t width;
             uint16_t height;
             const void* bitmap;
+            uint8_t scale;
         } lo_bitmap;
         struct {
             uint16_t width;
             uint16_t height;
             const void* bitmap;
+            uint8_t scale;
             size_t bitmapOffset;
             uint8_t bits;
             uint8_t mask;
+            size_t lengthLeft;
         } lo_bitmap_cont;
     };
 };
