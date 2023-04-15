@@ -6,16 +6,12 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "font.h"
 
 #define LCD_BUFFER_SIZE 16 * 1024
 #define LCD_MAX_DMA_TRANSFER 32 * 1024 - 2
-
-typedef enum LcdOperationEnum_t {
-    RECT_FILL,
-    TEXT
-} LcdOperationEnum;
 
 typedef union LcdColor_t {
     uint16_t word;
@@ -27,6 +23,10 @@ typedef union LcdColor_t {
     };
 } LcdColor;
 
+#define TFT_WIDTH 320
+#define TFT_HEIGHT 480
+#define TFT_MEMCTL 0x40
+
 #define TFT_BLACK   (LcdColor) { 0b0000000000000000 }
 #define TFT_WHITE   (LcdColor) { 0b1111111111011111 }
 #define TFT_RED     (LcdColor) { 0b0000000000011111 }
@@ -36,6 +36,8 @@ typedef union LcdColor_t {
 #define TFT_MAGENTA (LcdColor) { 0b1111100000011111 }
 #define TFT_CYAN    (LcdColor) { 0b1111111111000000 }
 
+#define FONT_Y_OFFSET 6
+
 static inline LcdColor tft_colmul(LcdColor color, float scalar) {
     LcdColor result;
     result.r = (float)color.r * scalar;
@@ -43,6 +45,11 @@ static inline LcdColor tft_colmul(LcdColor color, float scalar) {
     result.b = (float)color.b * scalar;
     return result;
 }
+
+typedef enum LcdOperationEnum_t {
+    RECT_FILL,
+    TEXT
+} LcdOperationEnum;
 
 struct LcdOperation {
     LcdOperationEnum lo_op;
@@ -90,11 +97,11 @@ extern void tft_submit(struct LcdOperation* op);
  * @brief Submit LCD operations
  * Submits multiple LCD operations to the render queue,
  * the operations are not freed after the render is finished.
- * 
+ *
  * @param ops Array of operations
  * @param count Length of the array
  */
-extern void tft_submit_multiple(struct LcdOperation* ops, unsigned int count);
+extern void tft_submit_multiple(struct LcdOperation* ops, size_t count);
 
 /**
  * @brief Start render
@@ -103,6 +110,27 @@ extern void tft_submit_multiple(struct LcdOperation* ops, unsigned int count);
  * freed (if lo_static is false)
  */
 extern void tft_start_render();
+
+/**
+ * @brief Recalibrate TouchPanel
+ * This function will start the touch panel calibration procedure,
+ * you will have to click 4 spots which will appear on the display.
+ */
+extern void tft_recalibrate_tp();
+
+/**
+ * @brief TFT event loop
+ * This method has to be periodically called to service
+ * any touch events that happen.
+ */
+extern void tft_main_loop();
+
+/**
+ * @brief TouchPanel interrupt handler
+ * You should register this method as the interrupt
+ * handler for the TP Irq pin on the falling edge.
+ */
+extern void tft_tp_irq();
 
 #ifdef __cplusplus
 }

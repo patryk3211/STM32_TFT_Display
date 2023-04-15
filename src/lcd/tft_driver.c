@@ -15,6 +15,8 @@
  *
  *   PB3 - LCD Command/Data
  *   PB4 - LCD Reset
+ *   PB5 - TP Select
+ *   PB12 - TP Interrupt
  *
 \***********************************************/
 
@@ -24,11 +26,16 @@
 #define LCD_SCK     GPIO_PIN_5
 #define LCD_SS      GPIO_PIN_4
 
-#define LCD_DC  GPIO_PIN_3
-#define LCD_RST GPIO_PIN_4
+#define LCD_DC      GPIO_PIN_3
+#define LCD_RST     GPIO_PIN_4
+#define TP_SS       GPIO_PIN_5
+#define TP_INT      GPIO_PIN_12
 
 #define LCD_SELECT() HAL_GPIO_WritePin(GPIOA, LCD_SS, GPIO_PIN_RESET);
 #define LCD_DESELECT() HAL_GPIO_WritePin(GPIOA, LCD_SS, GPIO_PIN_SET);
+
+#define TP_SELECT() HAL_GPIO_WritePin(GPIOB, TP_SS, GPIO_PIN_RESET);
+#define TP_DESELECT() HAL_GPIO_WritePin(GPIOB, TP_SS, GPIO_PIN_SET);
 
 #define LCD_MODE_CMD() HAL_GPIO_WritePin(GPIOB, LCD_DC, GPIO_PIN_RESET);
 #define LCD_MODE_DATA() HAL_GPIO_WritePin(GPIOB, LCD_DC, GPIO_PIN_SET);
@@ -51,18 +58,38 @@ const uint8_t TFT_Init_Sequence[] = {
     0xFF, 0xE0, 0x0F, 0x1F, 0x1C, 0x0C, 0x0F, 0x08, 0x48, 0x98, 0x37, 0x0A, 0x13, 0x04, 0x11, 0x0D, 0x00,
     0xFF, 0xE1, 0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75, 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00,
     0xFF, 0x20,
-    0xFF, 0x36, 0x48,
+    0xFF, 0x36, TFT_MEMCTL,
     0xFF
 };
+
+/********** TouchPanel command sequence **********/
+const uint8_t TFT_TP_Sequence[] = { 0xD0, 0x00,  0xD0, 0x00,  0xD0, 0x00,  0xD0, 0x00,
+                                    0x90, 0x00,  0x90, 0x00,  0x90, 0x00,  0x90, 0x00,
+                                    0xB0, 0x00,  0xC0, 0x00,                            0x00 };
 
 /********** Global variables **********/
 SPI_HandleTypeDef tft_lcdSPI;
 DMA_HandleTypeDef tft_lcdDMA;
 
+uint8_t tft_rendering;
+
 uint16_t tft_lcdBuffer[LCD_BUFFER_SIZE]; // We'll allocate a 16K buffer for drawing things
 
 struct LcdOperation* tft_lcdOperations = 0;
 struct LcdOperation* tft_lcdLastOp = 0;
+
+uint8_t tft_tpHandled;
+uint8_t tft_tpPending;
+
+uint16_t tft_tpX;
+uint16_t tft_tpY;
+
+uint16_t tft_tpCalibrationData[4] = {
+    3600, // x0 position
+    3600, // y0 position
+    300,  // x1 position
+    300,  // y1 position
+};
 
 /********** Functions **********/
 
@@ -201,6 +228,7 @@ void tft_submit(struct LcdOperation* op) {
         tft_lcdLastOp->lo_next = op;
         tft_lcdLastOp = op;
     }
+    op->lo_next = 0;
 }
 
 void tft_submit_multiple(struct LcdOperation* ops, size_t count) {
@@ -304,14 +332,14 @@ void tft_render_text(struct LcdOperation* op) {
             uint8_t mask = 0;
 
             // Before bit-mapped area (vertically)
-            for(size_t yy = y - lineHeight; yy < y + glyph.bfg_yOffset - 1; ++yy) {
+            for(size_t yy = y - lineHeight; yy < y + glyph.bfg_yOffset - FONT_Y_OFFSET; ++yy) {
                 for(size_t xx = x; xx < x + glyph.bfg_xAdvance; ++xx) {
                     LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
                 }
             }
 
             // After bit-mapped area (vertically)
-            for(size_t yy = y + glyph.bfg_yOffset - 1 + glyph.bfg_height; yy < y; ++yy) {
+            for(size_t yy = y + glyph.bfg_yOffset - FONT_Y_OFFSET + glyph.bfg_height; yy < y; ++yy) {
                 for(size_t xx = x; xx < x + glyph.bfg_xAdvance; ++xx) {
                     LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
                 }
@@ -319,14 +347,14 @@ void tft_render_text(struct LcdOperation* op) {
 
             // Before bit-mapped area (horizontally)
             for (size_t xx = x; xx < x + glyph.bfg_xOffset; ++xx) {
-                for(size_t yy = y + glyph.bfg_yOffset - 1; yy < y + glyph.bfg_yOffset - 1 + glyph.bfg_height; ++yy) {
+                for(size_t yy = y + glyph.bfg_yOffset - FONT_Y_OFFSET; yy < y + glyph.bfg_yOffset - FONT_Y_OFFSET + glyph.bfg_height; ++yy) {
                     LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
                 }
             }
 
             // After bit-mapped area (horizontally)
             for (size_t xx = x + glyph.bfg_xOffset + glyph.bfg_width; xx < x + glyph.bfg_xAdvance; ++xx) {
-                for(size_t yy = y + glyph.bfg_yOffset - 1; yy < y + glyph.bfg_yOffset - 1 + glyph.bfg_height; ++yy) {
+                for(size_t yy = y + glyph.bfg_yOffset - FONT_Y_OFFSET; yy < y + glyph.bfg_yOffset - FONT_Y_OFFSET + glyph.bfg_height; ++yy) {
                     LCD_ENCODE_COLOR(xx + yy * xMax, op->lo_bg);
                 }
             }
@@ -342,7 +370,7 @@ void tft_render_text(struct LcdOperation* op) {
                     mask >>= 1;
 
                     size_t xPos = x + xx + glyph.bfg_xOffset;
-                    size_t yPos = y + yy + glyph.bfg_yOffset - 1;
+                    size_t yPos = y + yy + glyph.bfg_yOffset - FONT_Y_OFFSET;
                     LCD_ENCODE_COLOR(xPos + yPos * xMax, color);
                 }
             }
@@ -413,10 +441,12 @@ void tft_lcd_dma_complete() {
     } else {
         // Finish the transfer
         LCD_DESELECT();
+        tft_rendering = 0;
     }
 }
 
 void tft_start_render() {
+    tft_rendering = 1;
     tft_render_op(tft_lcdOperations);
 }
 
@@ -437,7 +467,7 @@ void tft_driver_init() {
     GpioOut.Speed = GPIO_SPEED_HIGH;
     HAL_GPIO_Init(GPIOA, &GpioOut);
 
-    GpioOut.Pin = LCD_DC | LCD_RST;
+    GpioOut.Pin = LCD_DC | LCD_RST | TP_SS;
     HAL_GPIO_Init(GPIOB, &GpioOut);
 
     GPIO_InitTypeDef GpioAf;
@@ -452,6 +482,7 @@ void tft_driver_init() {
     GpioAf.Pull = GPIO_PULLDOWN;
     HAL_GPIO_Init(GPIOA, &GpioAf);
 
+    TP_DESELECT();
     LCD_DESELECT();
     LCD_DEASSERT_RST();
     LCD_DELAY(5);
@@ -493,6 +524,10 @@ void tft_driver_init() {
     HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 3, 0);
     HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 
+    // Setup TouchPanel interrupt
+    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
     /****************** Configure TFT LCD *********************/
 
     // First, reset the LCD panel
@@ -531,6 +566,8 @@ void tft_driver_init() {
     // Switch SPI into 16 bit mode for faster data transfer
     tft_lcdSPI.Init.DataSize = SPI_DATASIZE_16BIT;
     HAL_SPI_Init(&tft_lcdSPI);
+
+    tft_rendering = 0;
 }
 
 void DMA2_Stream2_IRQHandler() {
@@ -539,4 +576,98 @@ void DMA2_Stream2_IRQHandler() {
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef* hspi) {
     tft_lcd_dma_complete();
+}
+
+__attribute__((weak)) void tft_touch_cb(uint16_t x, uint16_t y) {
+    UNUSED(x);
+    UNUSED(y);
+}
+
+void tft_main_loop() {
+    if(tft_tpPending) {
+        uint16_t startX, endX, startY, endY;
+        uint8_t flipX, flipY;
+        if(tft_tpCalibrationData[0] > tft_tpCalibrationData[2]) {
+            startX = tft_tpCalibrationData[2];
+            endX = tft_tpCalibrationData[0];
+            flipX = 1;
+        } else {
+            startX = tft_tpCalibrationData[0];
+            endX = tft_tpCalibrationData[2];
+            flipX = 0;
+        }
+        if(tft_tpCalibrationData[1] > tft_tpCalibrationData[3]) {
+            startY = tft_tpCalibrationData[3];
+            endY = tft_tpCalibrationData[1];
+            flipY = 1;
+        } else {
+            startY = tft_tpCalibrationData[1];
+            endY = tft_tpCalibrationData[3];
+            flipY = 0;
+        }
+
+        uint16_t tX = (uint32_t)(tft_tpX - startX) * TFT_WIDTH / endX;
+        if(flipX)
+            tX = TFT_WIDTH - tX;
+        uint16_t tY = (uint32_t)(tft_tpY - startY) * TFT_HEIGHT / endY;
+        if(flipY)
+            tY = TFT_HEIGHT - tY;
+
+        if(tX <= TFT_WIDTH && tY <= TFT_HEIGHT)
+            tft_touch_cb(tX, tY);
+        tft_tpPending = 0;
+    }
+}
+
+void tft_tp_irq() {
+    // Touch has been detected
+    if(tft_tpHandled) {
+        tft_tpHandled = 0;
+        return;
+    }
+
+    if(tft_rendering) {
+        // We ignore the touch if a render is in progress
+        return;
+    }
+
+    tft_lcdSPI.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+    tft_lcdSPI.Init.DataSize = SPI_DATASIZE_8BIT;
+    HAL_SPI_Init(&tft_lcdSPI);
+
+    TP_SELECT();
+
+    uint8_t bufferIn[sizeof(TFT_TP_Sequence)];
+    HAL_SPI_TransmitReceive(&tft_lcdSPI, (uint8_t*)TFT_TP_Sequence, bufferIn, sizeof(TFT_TP_Sequence), 10);
+
+    TP_DESELECT();
+    tft_tpHandled = 1;
+
+    // Check touch pressure to determine if the touch is valid
+    uint16_t tft_z1 = (bufferIn[17] << 5) | (0x1F & (bufferIn[18] >> 3));
+    uint16_t tft_z2 = (bufferIn[19] << 5) | (0x1F & (bufferIn[20] >> 3));
+
+    if(tft_z2 - tft_z1 < 4000) {
+        // We can assume that this is a valid touch
+        uint32_t xAvg = 0;
+        uint32_t yAvg = 0;
+        for(int i = 0; i < 4; ++i) {
+            uint16_t tmp  = bufferIn[1 + i * 2] << 5;
+                    tmp |= 0x1F & (bufferIn[2 + i * 2] >> 3);
+            xAvg += tmp;
+                    tmp  = bufferIn[9 + i * 2] << 5;
+                    tmp |= 0x1F & (bufferIn[10 + i * 2] >> 3);
+            yAvg += tmp;
+        }
+
+        // Divide by 4
+        tft_tpX = xAvg >> 2;
+        tft_tpY = yAvg >> 2;
+
+        tft_tpPending = 1;
+    }
+
+    tft_lcdSPI.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    tft_lcdSPI.Init.DataSize = SPI_DATASIZE_16BIT;
+    HAL_SPI_Init(&tft_lcdSPI);
 }

@@ -6,6 +6,11 @@
 		}
 	],
 	"settings": {
-		"mesonbuild.configureOnOpen": false
+		"mesonbuild.configureOnOpen": false,
+		"files.associations": {
+			"wiring.h": "c",
+			"winterrupts.h": "c",
+			"wiring_pulse.h": "c"
+		}
 	}
 }
