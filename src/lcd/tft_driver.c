@@ -391,6 +391,101 @@ void tft_render_text(struct LcdOperation* op) {
     tft_lcd_dma(tft_lcdBuffer, xMax * y);
 }
 
+void tft_render_bitmap(struct LcdOperation* op) {
+    uint8_t bits, mask = 0;
+    size_t bitmapPos = 0;
+
+    size_t maxHeight = LCD_BUFFER_SIZE / op->lo_bitmap.width;
+    size_t processHeight = op->lo_bitmap.height;
+    uint8_t doContinue = 0;
+
+    if(processHeight > maxHeight) {
+        processHeight = maxHeight;
+        doContinue = 1;
+    }
+
+    for(size_t y = 0; y < processHeight; ++y) {
+        for(size_t x = 0; x < op->lo_bitmap.width; ++x) {
+            if(!mask) {
+                bits = ((uint8_t*)op->lo_bitmap.bitmap)[bitmapPos++];
+                mask = 0x80;
+            }
+
+            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg;
+            mask >>= 1;
+
+            LCD_ENCODE_COLOR(x + y * op->lo_bitmap.width, color);
+        }
+    }
+
+    tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_bitmap.width - 1, op->lo_y + processHeight - 1);
+    tft_dma_memmode(1);
+    tft_lcd_dma(tft_lcdBuffer, op->lo_bitmap.width * processHeight);
+
+    if(doContinue) {
+        struct LcdOperation* contOp = tft_new_operation(BITMAP_CONTINUE);
+        contOp->lo_fg = op->lo_fg;
+        contOp->lo_bg = op->lo_bg;
+        contOp->lo_x = op->lo_x;
+        contOp->lo_y = op->lo_y + processHeight;
+        contOp->lo_bitmap_cont.width = op->lo_bitmap.width;
+        contOp->lo_bitmap_cont.height = op->lo_bitmap.height - processHeight;
+        contOp->lo_bitmap_cont.bitmap = op->lo_bitmap.bitmap;
+        contOp->lo_bitmap_cont.bits = bits;
+        contOp->lo_bitmap_cont.mask = mask;
+        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos;
+        tft_insert_after(op, contOp);
+    }
+}
+
+void tft_render_cont_bitmap(struct LcdOperation* op) {
+    uint8_t bits = op->lo_bitmap_cont.bits;
+    uint8_t mask = op->lo_bitmap_cont.mask;
+    size_t bitmapPos = op->lo_bitmap_cont.bitmapOffset;
+
+    size_t maxHeight = LCD_BUFFER_SIZE / op->lo_bitmap_cont.width;
+    size_t processHeight = op->lo_bitmap_cont.height;
+    uint8_t doContinue = 0;
+
+    if(processHeight > maxHeight) {
+        processHeight = maxHeight;
+        doContinue = 1;
+    }
+
+    for(size_t y = 0; y < processHeight; ++y) {
+        for(size_t x = 0; x < op->lo_bitmap_cont.width; ++x) {
+            if(!mask) {
+                bits = ((uint8_t*)op->lo_bitmap_cont.bitmap)[bitmapPos++];
+                mask = 0x80;
+            }
+
+            LcdColor color = (bits & mask) ? op->lo_fg : op->lo_bg;
+            mask >>= 1;
+
+            LCD_ENCODE_COLOR(x + y * op->lo_bitmap_cont.width, color);
+        }
+    }
+
+    tft_set_window(op->lo_x, op->lo_y, op->lo_x + op->lo_bitmap_cont.width - 1, op->lo_y + processHeight - 1);
+    tft_dma_memmode(1);
+    tft_lcd_dma(tft_lcdBuffer, op->lo_bitmap_cont.width * processHeight);
+
+    if(doContinue) {
+        struct LcdOperation* contOp = tft_new_operation(BITMAP_CONTINUE);
+        contOp->lo_fg = op->lo_fg;
+        contOp->lo_bg = op->lo_bg;
+        contOp->lo_x = op->lo_x;
+        contOp->lo_y = op->lo_y + processHeight;
+        contOp->lo_bitmap_cont.width = op->lo_bitmap_cont.width;
+        contOp->lo_bitmap_cont.height = op->lo_bitmap_cont.height - processHeight;
+        contOp->lo_bitmap_cont.bitmap = op->lo_bitmap_cont.bitmap;
+        contOp->lo_bitmap_cont.bits = bits;
+        contOp->lo_bitmap_cont.mask = mask;
+        contOp->lo_bitmap_cont.bitmapOffset = bitmapPos;
+        tft_insert_after(op, contOp);
+    }
+}
+
 void tft_render_op(struct LcdOperation* op) {
     switch(op->lo_op) {
         case RECT_FILL: {
@@ -416,9 +511,15 @@ void tft_render_op(struct LcdOperation* op) {
             tft_dma_memmode(0);
             tft_lcd_dma(&op->lo_fg, modifiedPixels);
         } break;
-        case TEXT: {
+        case TEXT:
             tft_render_text(op);
-        } break;
+            break;
+        case BITMAP:
+            tft_render_bitmap(op);
+            break;
+        case BITMAP_CONTINUE:
+            tft_render_cont_bitmap(op);
+            break;
     }
 }
 

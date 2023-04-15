@@ -50,7 +50,9 @@ static inline LcdColor tft_colmul(LcdColor color, float scalar) {
 
 typedef enum LcdOperationEnum_t {
     RECT_FILL,
-    TEXT
+    TEXT,
+    BITMAP,
+    BITMAP_CONTINUE
 } LcdOperationEnum;
 
 struct LcdOperation {
@@ -73,6 +75,19 @@ struct LcdOperation {
             const char* value;
             const struct BitmapFont* font;
         } lo_text;
+        struct {
+            uint16_t width;
+            uint16_t height;
+            const void* bitmap;
+        } lo_bitmap;
+        struct {
+            uint16_t width;
+            uint16_t height;
+            const void* bitmap;
+            size_t bitmapOffset;
+            uint8_t bits;
+            uint8_t mask;
+        } lo_bitmap_cont;
     };
 };
 
