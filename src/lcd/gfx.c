@@ -9,8 +9,8 @@
     (listentry)->operation.lo_op = (optype); \
     (listentry)->operation.lo_fg = element->ge_color; \
     (listentry)->operation.lo_bg = context->c_prevColor; \
-    (listentry)->operation.lo_x = element->ge_x + context->c_x; \
-    (listentry)->operation.lo_y = element->ge_y + context->c_y
+    (listentry)->operation.lo_x = gfx_decode_position(element->ge_x, context) + context->c_x; \
+    (listentry)->operation.lo_y = gfx_decode_position(element->ge_y, context) + context->c_y
 
 size_t gfx_listLength = 0;
 struct OpListEntry* gfx_list = 0;
@@ -38,8 +38,33 @@ typedef struct Context_t {
     uint16_t c_x;
     uint16_t c_y;
 
+    uint16_t c_prevWidth;
+    uint16_t c_prevHeight;
+
     LcdColor c_prevColor;
 } Context;
+
+int16_t gfx_decode_position(uint16_t encoded, Context* ctx) {
+    int16_t numberPart = encoded & POSITION_NUMBER_PART;
+    if(encoded & POSITION_SIGN_BIT) {
+        // Sign bit set, negate the number
+        numberPart |= ~POSITION_NUMBER_PART;
+    }
+
+    switch(encoded & RELATIVE_TO_MASK) {
+        case RELATIVE_TO_WIDTH:
+            return ctx->c_prevWidth + numberPart;
+        case RELATIVE_TO_HEIGHT:
+            return ctx->c_prevHeight + numberPart;
+        case 0x0000:
+        case RELATIVE_TO_MASK:
+            // These two cases are either a normal number or a negative number,
+            // they should be interpreted as a simple number.
+            return numberPart;
+        default:
+            return 0;
+    }
+}
 
 void gfx_insert_op(struct OpListEntry* entry) {
     if(!gfx_list) {
@@ -70,18 +95,33 @@ DEF_HANDLE_TYPE(GFX_BOX) {
     struct OpListEntry* e = ALLOC(OpListEntry);
 
     BASE_INFO(e, RECT_FILL);
-    e->operation.lo_rect.width = element->ge_width;
-    e->operation.lo_rect.height = element->ge_height;
+    e->operation.lo_rect.width = gfx_decode_position(element->ge_width, context);
+    e->operation.lo_rect.height = gfx_decode_position(element->ge_height, context);
 
     gfx_insert_op(e);
 
     Context ctx_new;
     ctx_new.c_x = e->operation.lo_x;
     ctx_new.c_y = e->operation.lo_y;
+    ctx_new.c_prevWidth = e->operation.lo_rect.width;
+    ctx_new.c_prevHeight = e->operation.lo_rect.height;
     ctx_new.c_prevColor = element->ge_color;
 
     for(size_t i = 0; i < element->ge_childrenCount; ++i)
         gfx_handle_element(element->ge_children + i, &ctx_new);
+}
+
+size_t gfx_text_length(const char* text, const struct BitmapFont* font) {
+    size_t len = 0;
+    for(const char* c = text; *c; ++c) {
+        if(*c < font->bf_firstChar || *c > font->bf_lastChar)
+            continue;
+
+        struct BitmapFontGlyph glyph = font->bf_glyphs[*c - font->bf_firstChar];
+        len += glyph.bfg_xAdvance;
+    }
+
+    return len;
 }
 
 DEF_HANDLE_TYPE(GFX_TEXT) {
@@ -91,6 +131,22 @@ DEF_HANDLE_TYPE(GFX_TEXT) {
     e->operation.lo_text.value = element->ge_text;
     e->operation.lo_text.font = element->ge_font;
 
+    if(element->ge_textAlign == 1) {
+        // Calculate text length
+        size_t len = gfx_text_length(element->ge_text, element->ge_font);
+
+        if(len < element->ge_width) {
+            // We can center the horizontally
+            size_t emptyLen = element->ge_width - len;
+            e->operation.lo_x += emptyLen / 2;
+        }
+    } else if(element->ge_textAlign == 2) {
+        size_t len = gfx_text_length(element->ge_text, element->ge_font);
+
+        // Offset text to the left by its length
+        e->operation.lo_x -= len;
+    }
+
     gfx_insert_op(e);
 }
 
@@ -98,8 +154,8 @@ DEF_HANDLE_TYPE(GFX_BUTTON) {
     struct OpListEntry* bg = ALLOC(OpListEntry);
 
     BASE_INFO(bg, RECT_FILL);
-    bg->operation.lo_rect.width = element->ge_width;
-    bg->operation.lo_rect.height = element->ge_height;
+    bg->operation.lo_rect.width = gfx_decode_position(element->ge_width, context);
+    bg->operation.lo_rect.height = gfx_decode_position(element->ge_height, context);
 
     gfx_insert_op(bg);
 
@@ -122,15 +178,15 @@ DEF_HANDLE_TYPE(GFX_BUTTON) {
         len += glyph.bfg_xAdvance;
     }
 
-    if(len < element->ge_width) {
+    if(len < bg->operation.lo_rect.width) {
         // We can center the text inside of the container horizontally
-        size_t emptyLen = element->ge_width - len;
+        size_t emptyLen = bg->operation.lo_rect.width - len;
         text->operation.lo_x += emptyLen / 2;
     }
 
-    if(element->ge_font->bf_yAdvance < element->ge_height) {
+    if(element->ge_font->bf_yAdvance < bg->operation.lo_rect.height) {
         // We can center text inside of the container vertically
-        size_t emptyHeight = element->ge_height - element->ge_font->bf_yAdvance;
+        size_t emptyHeight = bg->operation.lo_rect.height - element->ge_font->bf_yAdvance;
         text->operation.lo_y += emptyHeight / 2;
     }
 
@@ -140,8 +196,8 @@ DEF_HANDLE_TYPE(GFX_BUTTON) {
 
         evEn->x = bg->operation.lo_x;
         evEn->y = bg->operation.lo_y;
-        evEn->width = element->ge_width;
-        evEn->height = element->ge_height;
+        evEn->width = bg->operation.lo_rect.width;
+        evEn->height = bg->operation.lo_rect.height;
         evEn->callback = element->ge_click_cb;
         evEn->element = element;
 
@@ -151,11 +207,55 @@ DEF_HANDLE_TYPE(GFX_BUTTON) {
     gfx_insert_op(text);
 }
 
+DEF_HANDLE_TYPE(GFX_BORDER) {
+    size_t x = gfx_decode_position(element->ge_x, context) + context->c_x;
+    size_t y = gfx_decode_position(element->ge_y, context) + context->c_y;
+    size_t w = gfx_decode_position(element->ge_width, context);
+    size_t h = gfx_decode_position(element->ge_height, context);
+
+    struct OpListEntry* top = ALLOC(OpListEntry);
+    top->operation.lo_op = RECT_FILL;
+    top->operation.lo_fg = element->ge_color;
+    top->operation.lo_x = x;
+    top->operation.lo_y = y;
+    top->operation.lo_rect.width = w;
+    top->operation.lo_rect.height = element->ge_thickness;
+    gfx_insert_op(top);
+
+    struct OpListEntry* bottom = ALLOC(OpListEntry);
+    bottom->operation.lo_op = RECT_FILL;
+    bottom->operation.lo_fg = element->ge_color;
+    bottom->operation.lo_x = x;
+    bottom->operation.lo_y = y + h - element->ge_thickness;
+    bottom->operation.lo_rect.width = w;
+    bottom->operation.lo_rect.height = element->ge_thickness;
+    gfx_insert_op(bottom);
+
+    struct OpListEntry* left = ALLOC(OpListEntry);
+    left->operation.lo_op = RECT_FILL;
+    left->operation.lo_fg = element->ge_color;
+    left->operation.lo_x = x;
+    left->operation.lo_y = y;
+    left->operation.lo_rect.width = element->ge_thickness;
+    left->operation.lo_rect.height = h;
+    gfx_insert_op(left);
+
+    struct OpListEntry* right = ALLOC(OpListEntry);
+    right->operation.lo_op = RECT_FILL;
+    right->operation.lo_fg = element->ge_color;
+    right->operation.lo_x = x + w - element->ge_thickness;
+    right->operation.lo_y = y;
+    right->operation.lo_rect.width = element->ge_thickness;
+    right->operation.lo_rect.height = h;
+    gfx_insert_op(right);
+}
+
 void gfx_handle_element(const struct GuiElement* element, Context* context) {
     switch(element->ge_type) {
         HANDLE_TYPE(GFX_BOX);
         HANDLE_TYPE(GFX_TEXT);
         HANDLE_TYPE(GFX_BUTTON);
+        HANDLE_TYPE(GFX_BORDER);
     }
 }
 
@@ -164,6 +264,8 @@ GfxRenderChain gfx_create_render_chain(const struct GuiElement* elements, size_t
     Context ctx;
     ctx.c_x = 0;
     ctx.c_y = 0;
+    ctx.c_prevWidth = TFT_WIDTH;
+    ctx.c_prevHeight = TFT_HEIGHT;
     ctx.c_prevColor = TFT_BLACK;
 
     for(size_t i = 0; i < element_count; ++i)

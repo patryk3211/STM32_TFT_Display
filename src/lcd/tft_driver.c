@@ -446,8 +446,10 @@ void tft_lcd_dma_complete() {
 }
 
 void tft_start_render() {
-    tft_rendering = 1;
-    tft_render_op(tft_lcdOperations);
+    if(!tft_rendering) {
+        tft_rendering = 1;
+        tft_render_op(tft_lcdOperations);
+    }
 }
 
 void tft_driver_init() {

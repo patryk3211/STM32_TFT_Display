@@ -36,6 +36,8 @@ typedef union LcdColor_t {
 #define TFT_MAGENTA (LcdColor) { 0b1111100000011111 }
 #define TFT_CYAN    (LcdColor) { 0b1111111111000000 }
 
+#define TFT_COLOR(r, g, b) (LcdColor) { ((b & 0x1F) << 11) | ((g & 0x1F) << 6) | (r & 0x1F) }
+
 #define FONT_Y_OFFSET 6
 
 static inline LcdColor tft_colmul(LcdColor color, float scalar) {
