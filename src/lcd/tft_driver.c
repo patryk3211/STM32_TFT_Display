@@ -593,6 +593,8 @@ void tft_render_op(struct LcdOperation* op) {
 
 /********** End of rendering functions **********/
 
+__attribute__((weak)) void tft_render_finished() { }
+
 void tft_lcd_dma_complete() {
     // Take the current operation out of queue
     struct LcdOperation* oldOp = tft_lcdOperations;
@@ -611,6 +613,8 @@ void tft_lcd_dma_complete() {
         // Finish the transfer
         LCD_DESELECT();
         tft_rendering = 0;
+
+        tft_render_finished();
     }
 }
 

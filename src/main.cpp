@@ -15,7 +15,7 @@ const GuiElement header_children[] = {
 };
 
 GuiElement position_box_children[] = {
-    GUI_BORDER(-1, -1, PARENT_WIDTH(1), PARENT_HEIGHT(1), TFT_CYAN, 1),
+    GUI_BORDER(-1, -1, PARENT_WIDTH(2), PARENT_HEIGHT(2), TFT_CYAN, 1),
 
     GUI_TEXT(4, 4, TFT_WHITE, "Position", FreeSans12pt7b),
     GUI_TEXT_RIGHT(PARENT_WIDTH(-4), 4, TFT_WHITE, "[mm]", FreeSans12pt7b),
@@ -25,18 +25,43 @@ GuiElement position_box_children[] = {
     GUI_TEXT(8, 8 + 24 * 3, TFT_BLUE,  "Z: 000.00 000.00", FreeMonoBold12pt7b)
 };
 
-GuiElement control_box_children[] = {
-    GUI_BORDER(-1, -1, PARENT_WIDTH(1), PARENT_HEIGHT(1), TFT_YELLOW, 1),
+const uint8_t button_up[] = {0, 0, 127, 254, 64, 2, 65, 130, 67, 194, 71, 226, 79, 242, 65, 130, 65, 130, 65, 130, 65, 130, 65, 130, 65, 130, 64, 2, 127, 254, 0, 0};
+const uint8_t button_down[] = {0, 0, 127, 254, 64, 2, 65, 130, 65, 130, 65, 130, 65, 130, 65, 130, 65, 130, 79, 242, 71, 226, 67, 194, 65, 130, 64, 2, 127, 254, 0, 0};
+const uint8_t button_left[] = {0, 0, 127, 254, 64, 2, 64, 2, 66, 2, 70, 2, 78, 2, 95, 250, 95, 250, 78, 2, 70, 2, 66, 2, 64, 2, 64, 2, 127, 254, 0, 0};
+const uint8_t button_right[] = {0, 0, 127, 254, 64, 2, 64, 2, 64, 66, 64, 98, 64, 114, 95, 250, 95, 250, 64, 114, 64, 98, 64, 66, 64, 2, 64, 2, 127, 254, 0, 0};
 
-    GUI_TEXT(4, 4, DARK_GRAY, "Step: 1.00mm", FreeSans9pt7b),
-    GUI_TEXT_RIGHT(PARENT_WIDTH(-4), 4, DARK_GRAY, "Feed: 100mm/s", FreeSans9pt7b)
+GuiElement control_box_rates_children[] = {
+    GUI_BUTTON(0, 0, 120, 24, TFT_YELLOW, TFT_BLACK, "Step: 1.00mm", FreeSans9pt7b, 0),
+    GUI_BUTTON(148, 0, 120, 24, TFT_YELLOW, TFT_BLACK, "Feed: 100mm/s", FreeSans9pt7b, 0)
 };
 
-const GuiElement me_children[] = {
+GuiElement control_box_children[] = {
+    GUI_BORDER(-1, -1, PARENT_WIDTH(2), PARENT_HEIGHT(2), TFT_YELLOW, 1),
+
+    GUI_BOX_STATIC(0, 0, PARENT_WIDTH(0), 24, TFT_YELLOW, control_box_rates_children),
+
+    GUI_IMAGE_BUTTON( 60, 32, 48, 48, 3, TFT_COLOR(0, 1, 0), TFT_GREEN, button_up, 0, 0),
+    GUI_IMAGE_BUTTON( 60, 88, 48, 48, 3, TFT_COLOR(0, 1, 0), TFT_GREEN, button_down, 0, 0),
+    GUI_IMAGE_BUTTON(  8, 60, 48, 48, 3, TFT_COLOR(1, 0, 0), TFT_RED  , button_left, 0, 0),
+    GUI_IMAGE_BUTTON(112, 60, 48, 48, 3, TFT_COLOR(1, 0, 0), TFT_RED  , button_right, 0, 0),
+
+    GUI_IMAGE_BUTTON(192, 32, 48, 48, 3, TFT_COLOR(0, 0, 1), TFT_BLUE, button_up, 0, 0),
+    GUI_IMAGE_BUTTON(192, 88, 48, 48, 3, TFT_COLOR(0, 0, 1), TFT_BLUE, button_down, 0, 0),
+};
+
+GuiElement alarm_box_children[] = {
+    GUI_BORDER(-1, -1, PARENT_WIDTH(2), PARENT_HEIGHT(2), TFT_RED, 2),
+
+    GUI_TEXT_CENTERED(0, 2, PARENT_WIDTH(0), TFT_RED, "Alarm", FreeSans12pt7b)
+};
+
+GuiElement me_children[] = {
     GUI_BOX_STATIC(0, 0, PARENT_WIDTH(0), 32, TFT_BLUE, header_children),
 
     GUI_BOX_STATIC(16, 48, PARENT_WIDTH(-32), 112, TFT_BLACK, position_box_children),
-    GUI_BOX_STATIC(16, 176, PARENT_WIDTH(-32), 120, TFT_BLACK, control_box_children),
+    GUI_BOX_STATIC(16, 176, PARENT_WIDTH(-32), 144, TFT_BLACK, control_box_children),
+
+    GUI_BOX_STATIC(16, 336, PARENT_WIDTH(-32), 33, TFT_BLACK, alarm_box_children),
 
     GUI_BUTTON( 16, 440, 80, 24, TFT_BLUE, TFT_WHITE, "[Zero]", FreeSans9pt7b, 0),
     GUI_BUTTON(120, 440, 80, 24, TFT_BLUE, TFT_WHITE, "[Menu]", FreeSans9pt7b, 0),
@@ -45,34 +70,51 @@ const GuiElement me_children[] = {
 
 const GuiElement main_element = GUI_BOX_STATIC(0, 0, 320, 480, TFT_BLACK, me_children);
 
-const uint8_t bitmap[] = {0xff, 17, 0x0, 0x1f, 0xff, 3, 0xff, 0xf8, 0x1f, 0xff, 3, 0xff, 0xf8, 0x1f, 0xff, 3, 0xff, 0xf8, 0x1c, 0xff, 3, 0x0, 0x38, 0x1c, 0xff, 3, 0x0, 0x38, 0x1c, 0xff, 3, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x3f, 0xfc, 0x0, 0x38, 0x1c, 0x0, 0x3f, 0xfc, 0x0, 0x38, 0x1c, 0x0, 0x3f, 0xfc, 0x0, 0x38, 0x1c, 0x1, 0xff, 1, 0xff, 0x80, 0x38, 0x1c, 0x1, 0xff, 1, 0xff, 0x80, 0x38, 0x1c, 0x1, 0xff, 1, 0xff, 0x80, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0xf, 0xff, 1, 0xff, 0xf0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0x0, 0x7, 0xe0, 0x0, 0x38, 0x1c, 0xff, 3, 0x0, 0x38, 0x1c, 0xff, 3, 0x0, 0x38, 0x1c, 0xff, 3, 0x0, 0x38, 0x1f, 0xff, 3, 0xff, 0xf8, 0x1f, 0xff, 3, 0xff, 0xf8, 0x1f, 0xff, 3, 0xff, 0xf8, 0xff, 17, 0x0 };
+uint32_t prevUpdate = 0;
 
 void setup() {
     Serial.begin(9600);
 
     tft_driver_init();
 
-//    auto result = gfx_create_render_chain(&main_element, 1);
-//    tft_submit_multiple(result.grc_operations, result.grc_length);
-//
-//    gfx_activate_event_list(result.grc_eventList);
+    auto result = gfx_create_render_chain(&main_element, 1);
+    tft_submit_multiple(result.grc_operations, result.grc_length);
 
-    auto* op = tft_new_operation(RLE_BITMAP);
-    op->lo_fg = TFT_WHITE;
-    op->lo_bg = TFT_BLACK;
-    op->lo_x = 20;
-    op->lo_y = 20;
-    op->lo_bitmap.width = 48;
-    op->lo_bitmap.height = 48;
-    op->lo_bitmap.scale = 2;
-    op->lo_bitmap.bitmap = bitmap;
-    tft_submit(op);
+    gfx_activate_event_list(result.grc_eventList);
 
     tft_start_render();
 
     attachInterrupt(PB12, &tft_tp_irq, FALLING);
+
+    prevUpdate = millis();
+}
+
+GfxRenderChain chain;
+bool state = false;
+
+extern "C" void tft_render_finished() {
+    gfx_delete_render_chain(chain);
 }
 
 void loop() {
     tft_main_loop();
+
+    if(millis() - prevUpdate > 2000) {
+        if(!state) {
+            alarm_box_children[1].ge_color = TFT_BLACK;
+            me_children[3].ge_color = TFT_RED;
+            state = true;
+        } else {
+            alarm_box_children[1].ge_color = TFT_RED;
+            me_children[3].ge_color = TFT_BLACK;
+            state = false;
+        }
+        me_children[3].ge_dirty = true;
+
+        chain = gfx_create_update_chain(&main_element, 1);
+        tft_submit_multiple(chain.grc_operations, chain.grc_length);
+        tft_start_render();
+
+        prevUpdate = millis();
+    }
 }
