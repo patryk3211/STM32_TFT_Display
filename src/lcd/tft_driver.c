@@ -685,9 +685,11 @@ void tft_driver_init() {
     tft_lcdDMA.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
     tft_lcdDMA.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     tft_lcdDMA.Init.PeriphBurst = DMA_PBURST_SINGLE;
-    tft_lcdDMA.Init.MemBurst = DMA_MBURST_SINGLE;
     tft_lcdDMA.Init.Priority = DMA_PRIORITY_HIGH;
-    tft_lcdDMA.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+
+    tft_lcdDMA.Init.MemBurst = DMA_MBURST_INC8;
+    tft_lcdDMA.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+    tft_lcdDMA.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
     HAL_DMA_Init(&tft_lcdDMA);
     __HAL_LINKDMA(&tft_lcdSPI, hdmatx, tft_lcdDMA);
 
