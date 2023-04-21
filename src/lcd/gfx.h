@@ -27,6 +27,10 @@ typedef void callback_t(const void* element);
 #define PARENT_WIDTH(offset) ((offset & 0x3FF) | RELATIVE_TO_WIDTH)
 #define PARENT_HEIGHT(offset) ((offset & 0x3FF) | RELATIVE_TO_HEIGHT)
 
+#define ALIGN_LEFT    0
+#define ALIGN_CENTER  1
+#define ALIGN_RIGHT   2
+
 struct GuiElement {
     GuiElementType ge_type;
 
@@ -45,6 +49,7 @@ struct GuiElement {
             const char* ge_text;
             const struct BitmapFont* ge_font;
             callback_t* ge_clickCallback;
+            uint8_t ge_textAlign;
         } ge_button;
         /* Box */
         struct {
@@ -87,14 +92,15 @@ extern void gfx_activate_event_list(void* eventList);
 
 extern void gfx_delete_render_chain(GfxRenderChain chain);
 
-#define GUI_BUTTON(x, y, width, height, color, textcolor, text, font, clickcb) \
+#define GUI_BUTTON(x, y, width, height, color, textcolor, text, align, font, clickcb) \
     { GFX_BUTTON, x, y, width, height, \
       .ge_color = color, \
       .ge_button = { \
         .ge_textColor = textcolor, \
         .ge_text = text, \
         .ge_font = &font, \
-        .ge_clickCallback = clickcb } }
+        .ge_clickCallback = clickcb, \
+        .ge_textAlign = align } }
 #define GUI_TEXT(x, y, color, text, font) \
     { GFX_TEXT, x, y, \
       .ge_color = color, \

@@ -45,8 +45,10 @@
 
 #define SPI_WAIT_NBSY() while(__HAL_SPI_GET_FLAG(&tft_lcdSPI, SPI_FLAG_BSY))
 
-#include <Arduino.h>
-#define LCD_DELAY(ms) delay((ms));
+//#include <Arduino.h>
+//#define LCD_DELAY(ms) delay((ms));
+#include <src/cnc.h>
+#define LCD_DELAY(ms) cnc_delay_ms((ms));
 
 /********** LCD TFT driver initialization commands **********/
 const uint8_t TFT_Init_Sequence[] = {
@@ -445,7 +447,7 @@ void tft_render_text(struct LcdOperation* op) {
     }
 
 void tft_render_bitmap(struct LcdOperation* op) {
-    uint8_t bits, mask = 0;
+    uint8_t bits = 0, mask = 0;
     size_t bitmapPos = 0;
 
     DO_BITMAP_RENDERING(lo_bitmap)
@@ -532,7 +534,7 @@ void tft_render_cont_bitmap(struct LcdOperation* op) {
     }
 
 void tft_render_bitmap_rle(struct LcdOperation* op) {
-    uint8_t bits, mask = 0;
+    uint8_t bits = 0, mask = 0;
     size_t bitmapPos = 0;
     size_t lengthLeft = 0;
 
@@ -619,7 +621,7 @@ void tft_lcd_dma_complete() {
 }
 
 void tft_start_render() {
-    if(!tft_rendering) {
+    if(!tft_rendering && tft_lcdOperations) {
         tft_rendering = 1;
         tft_render_op(tft_lcdOperations);
     }

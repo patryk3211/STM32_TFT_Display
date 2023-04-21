@@ -141,7 +141,7 @@ DEF_HANDLE_TYPE(GFX_TEXT) {
     e->operation.lo_text.value = element->ge_text.ge_text;
     e->operation.lo_text.font = element->ge_text.ge_font;
 
-    if(element->ge_text.ge_textAlign == 1) {
+    if(element->ge_text.ge_textAlign == ALIGN_CENTER) {
         // Calculate text length
         size_t len = gfx_text_length(element->ge_text.ge_text, element->ge_text.ge_font);
         size_t width = gfx_decode_position(element->ge_width, context);
@@ -151,7 +151,7 @@ DEF_HANDLE_TYPE(GFX_TEXT) {
             size_t emptyLen = width - len;
             e->operation.lo_x += emptyLen / 2;
         }
-    } else if(element->ge_text.ge_textAlign == 2) {
+    } else if(element->ge_text.ge_textAlign == ALIGN_RIGHT) {
         size_t len = gfx_text_length(element->ge_text.ge_text, element->ge_text.ge_font);
 
         // Offset text to the left by its length
@@ -179,20 +179,20 @@ DEF_HANDLE_TYPE(GFX_BUTTON) {
     text->operation.lo_text.value = element->ge_button.ge_text;
     text->operation.lo_text.font = element->ge_button.ge_font;
 
-    // Calculate text length
-    size_t len = 0;
-    for(const char* c = element->ge_button.ge_text; *c; ++c) {
-        if(*c < element->ge_button.ge_font->bf_firstChar || *c > element->ge_button.ge_font->bf_lastChar)
-            continue;
+    if(element->ge_button.ge_textAlign == ALIGN_CENTER) {
+        // Calculate text length
+        size_t len = gfx_text_length(element->ge_button.ge_text, element->ge_button.ge_font);
 
-        struct BitmapFontGlyph glyph = element->ge_button.ge_font->bf_glyphs[*c - element->ge_button.ge_font->bf_firstChar];
-        len += glyph.bfg_xAdvance;
-    }
+        if(len < bg->operation.lo_rect.width) {
+            // We can center the text inside of the container horizontally
+            size_t emptyLen = bg->operation.lo_rect.width - len;
+            text->operation.lo_x += emptyLen / 2;
+        }
+    } else if(element->ge_button.ge_textAlign == ALIGN_RIGHT) {
+        size_t len = gfx_text_length(element->ge_button.ge_text, element->ge_button.ge_font);
 
-    if(len < bg->operation.lo_rect.width) {
-        // We can center the text inside of the container horizontally
-        size_t emptyLen = bg->operation.lo_rect.width - len;
-        text->operation.lo_x += emptyLen / 2;
+        // Offset text to the left by its length
+        text->operation.lo_x = bg->operation.lo_x + bg->operation.lo_rect.width - len;
     }
 
     if(element->ge_button.ge_font->bf_yAdvance < bg->operation.lo_rect.height) {
